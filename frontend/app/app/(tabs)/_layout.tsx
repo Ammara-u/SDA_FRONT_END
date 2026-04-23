@@ -5,7 +5,7 @@ import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-
+import { Ionicons } from "@expo/vector-icons";
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
@@ -24,10 +24,28 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="search"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: "Search",
+          tabBarIcon: ({ color }) => <Ionicons name="search" size={22} color={color} />,
+          headerShown: false,
+        }}
+      />
+    
+      <Tabs.Screen
+        name="messages"
+        options={{
+          title: "Messages",
+          tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={22} color={color} />,
+          headerShown: false,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={22} color={color} />,
+          headerShown: false,
         }}
       />
     </Tabs>
