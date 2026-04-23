@@ -1,7 +1,11 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native"
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const API_URL = "http://127.0.0.1:8000/"; // your local IP, not localhost
 
 export default function HomePage() {
   return (
+    
     <View style={styles.container}>
       <Text style={styles.logo}>Unifi</Text>
 
