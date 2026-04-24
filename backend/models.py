@@ -11,8 +11,22 @@ class User(Base):
     password = Column(String)
     full_name = Column(String)
     created_at = Column(DateTime, server_default=func.now())
+    department=Column(String)
+    university=Column(String)
+    bio=Column(String)
+from sqlalchemy import UniqueConstraint
 
+class Follow(Base):
+    __tablename__ = "follows"
 
+    id = Column(String, primary_key=True)
+    follower_id = Column(String, ForeignKey("users.id"))
+    following_id = Column(String, ForeignKey("users.id"))
+
+    __table_args__ = (
+        UniqueConstraint("follower_id", "following_id"),
+    )
+    
 class Post(Base):
     __tablename__ = "posts"
 

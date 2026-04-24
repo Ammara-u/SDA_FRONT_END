@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from database import get_db
-from models import User
+from models import User,Follow
 from schema import TokenPair,UserCreate,UserLogin
 from database import engine,Base,SessionLocal
 import uuid
@@ -55,11 +55,27 @@ def create_access_token(data:dict,expires_delta:timedelta=None):
 def decode_access_token(token:str):
     try:
         payload=jwt.decode(token,SECRET_KEY,algorithms=[ALGORITHM])
+        return payload
     except JWTError:
         return None
 
 Base.metadata.create_all(bind=engine)
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    username = payload.get("sub")
+    user = db.query(User).filter(User.username == username).first()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user
 
 # sign up
 
@@ -142,3 +158,64 @@ def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
         "refresh_token": refresh_token, # You can reuse the current one
         "token_type": "bearer"
     }
+    
+    
+@app.post("/follow/{user_id}")
+def follow_user(user_id: str,
+                db: Session = Depends(get_db),
+                current_user: User = Depends(get_current_user)):
+
+    #  Prevent self-follow
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot follow yourself")
+
+    #  Check if already following
+    existing = db.query(Follow).filter(
+        Follow.follower_id == current_user.id,
+        Follow.following_id == user_id
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Already following")
+
+    # ✅ Create follow relationship
+    new_follow = Follow(
+        id=str(uuid.uuid4()),
+        follower_id=current_user.id,
+        following_id=user_id
+    )
+
+    db.add(new_follow)
+    db.commit()
+
+    return {"message": "Followed successfully"}
+
+
+@app.delete("/unfollow/{user_id}")
+def unfollow_user(user_id: str,
+                  db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_user)):
+
+    follow = db.query(Follow).filter(
+        Follow.follower_id == current_user.id,
+        Follow.following_id == user_id
+    ).first()
+
+    if not follow:
+        raise HTTPException(status_code=404, detail="Not following")
+
+    db.delete(follow)
+    db.commit()
+
+    return {"message": "Unfollowed successfully"}
+
+
+@app.get("/users/{user_id}/followers")
+def get_followers(user_id: str, db: Session = Depends(get_db)):
+    followers = db.query(Follow).filter(Follow.following_id == user_id).all()
+    return followers
+
+@app.get("/users/{user_id}/following")
+def get_following(user_id: str, db: Session = Depends(get_db)):
+    following = db.query(Follow).filter(Follow.follower_id == user_id).all()
+    return following
