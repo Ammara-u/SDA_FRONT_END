@@ -1,6 +1,5 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native"
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 const API_URL = "http://192.168.100.22:8000";
 
 import React, { useState } from "react";
