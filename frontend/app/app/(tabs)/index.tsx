@@ -7,27 +7,40 @@ import React, { useState } from "react";
 import { useRouter } from "expo-router";
 
 
-const router = useRouter();
 
 export default function HomePage() {
+  const router = useRouter();
   const [username, setUsername] = useState("");
 const [password, setPassword] = useState("");
 
 
 const handleLogin = async () => {
   try {
+    console.log("🔵 Logging in...");
+
     const response = await fetch(`${API_URL}/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        username: username,
-        password: password,
+        username,
+        password,
       }),
     });
 
-    const data = await response.json();
+    console.log("🟡 Status:", response.status);
+
+    const text = await response.text(); // ✅ safer than json()
+    console.log("🟡 Raw response:", text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      alert("Server did not return JSON");
+      return;
+    }
 
     if (!response.ok) {
       alert(data.detail || "Login failed");
@@ -37,13 +50,12 @@ const handleLogin = async () => {
     await AsyncStorage.setItem("access_token", data.access_token);
     await AsyncStorage.setItem("refresh_token", data.refresh_token);
 
-    console.log("Login success:", data);
+    console.log("✅ Login success");
 
-    // ✅ REDIRECT HERE
-    router.replace("/profile");  // or "/(tabs)/profile" depending on your structure
+    router.replace("/profile");
 
   } catch (error) {
-    console.log("Error:", error);
+    console.log("❌ Error:", error);
     alert("Something went wrong");
   }
 };

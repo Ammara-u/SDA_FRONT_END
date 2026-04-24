@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from database import get_db
-from models import User,Follow
+from models import User,Follow,Post
 from schema import TokenPair,UserCreate,UserLogin
 from database import engine,Base,SessionLocal
 import uuid
@@ -69,14 +69,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    username = payload.get("sub")
-    user = db.query(User).filter(User.username == username).first()
+    user_id = payload.get("sub")   # now it's ID
+
+    user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
     return user
-
 # sign up
 
 @app.post("/signup")
@@ -118,11 +118,11 @@ def login(user: UserLogin, db: Session = Depends(get_db)):    # 1. Fetch user fr
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # 3. Create both tokens (Frontend expects both per your TokenPair schema)
-    access_token = create_access_token(data={"sub": db_user.username})
+    access_token = create_access_token(data={"sub": db_user.id})
     
     # Simple refresh token for now (you can use your commented-out function later)
     refresh_token = create_access_token(
-        data={"sub": db_user.username}, 
+        data={"sub": db_user.id}, 
         expires_delta=timedelta(days=7)
     )
 
@@ -150,7 +150,7 @@ def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="User not found")
 
     # 3. Generate a NEW access token
-    new_access_token = create_access_token(data={"sub": user.username})
+    new_access_token = create_access_token(data={"sub": user.id})
     
     # 4. Return everything (keep the same refresh token or rotate it)
     return {
@@ -209,13 +209,25 @@ def unfollow_user(user_id: str,
 
     return {"message": "Unfollowed successfully"}
 
+@app.get("/users/id/{user_id}")
+def get_user_by_id(user_id: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 @app.get("/users/{user_id}/followers")
 def get_followers(user_id: str, db: Session = Depends(get_db)):
     followers = db.query(Follow).filter(Follow.following_id == user_id).all()
-    return followers
+    return [{"follower_id": f.follower_id, "following_id": f.following_id} for f in followers]
+
 
 @app.get("/users/{user_id}/following")
 def get_following(user_id: str, db: Session = Depends(get_db)):
     following = db.query(Follow).filter(Follow.follower_id == user_id).all()
-    return following
+    return [{"follower_id": f.follower_id, "following_id": f.following_id} for f in following]
+
+@app.get("/users/{user_id}/posts")
+def get_user_posts(user_id: str, db: Session = Depends(get_db)):
+    posts = db.query(Post).filter(Post.author_id == user_id).all()
+    return posts

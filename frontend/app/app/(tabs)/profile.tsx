@@ -65,9 +65,10 @@ export default function ProfileScreen({ navigation }: any) {
 
       const payload = decodeToken(token);
       const userId = payload?.sub;
-      console.log("👤 Username:", username);
+      
+      console.log("👤 Username:", userId);
 
-      if (!username) throw new Error("Invalid token");
+      if (!userId) throw new Error("Invalid token");
 
       const headers = {
         Authorization: `Bearer ${token}`,
@@ -75,7 +76,7 @@ export default function ProfileScreen({ navigation }: any) {
       };
 
       // ── USER ──
-      const userRes = await fetch(`${API_URL}/users/${username}`, { headers });
+      const userRes = await fetch(`${API_URL}/users/id/${userId}`, { headers });
       console.log("👤 User status:", userRes.status);
 
       const userData = await userRes.json();
@@ -84,8 +85,17 @@ export default function ProfileScreen({ navigation }: any) {
       setUser(userData);
 
       // ── POSTS ──
-      const postsRes = await fetch(`${API_URL}/users/${username}/posts`, { headers });
+      const postsRes = await fetch(`${API_URL}/users/${userId}/posts`, { headers });
 
+console.log("📦 Posts status:", postsRes.status);
+
+if (!postsRes.ok) {
+  console.log("❌ Posts API failed");
+} else {
+  const data = await postsRes.json();
+  console.log("📦 Posts:", data);
+  setPosts(Array.isArray(data) ? data : []);
+}
       if (postsRes.ok) {
         const data = await postsRes.json();
         setPosts(Array.isArray(data) ? data : []);
