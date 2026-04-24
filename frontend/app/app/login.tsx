@@ -1,25 +1,75 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native"
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_URL = "http://127.0.0.1:8000/"; // your local IP, not localhost
+const API_URL = "http://192.168.100.22:8000";
+
+import React, { useState } from "react";
+
 
 export default function HomePage() {
+
+  const [username, setUsername] = useState("");
+const [password, setPassword] = useState("");
+
+const handleLogin = async () => {
+  try {
+    const response = await fetch(`${API_URL}/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: username,
+        password: password,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      alert(data.detail || "Login failed");
+      return;
+    }
+
+  
+    await AsyncStorage.setItem("access_token", data.access_token);
+    await AsyncStorage.setItem("refresh_token", data.refresh_token);
+
+    console.log("Login success:", data);
+  } catch (error) {
+    console.log("Error:", error);
+    alert("Something went wrong");
+  }
+};
+
+
   return (
     
     <View style={styles.container}>
       <Text style={styles.logo}>Unifi</Text>
 
-      <TextInput placeholder="Username" style={styles.input} />
-      <TextInput placeholder="Password" style={styles.input} secureTextEntry />
+     <TextInput
+  placeholder="Username"
+  style={styles.input}
+  value={username}
+  onChangeText={setUsername}
+/>
 
+<TextInput
+  placeholder="Password"
+  style={styles.input}
+  secureTextEntry
+  value={password}
+  onChangeText={setPassword}
+/>
       {/* FIX: Wrap in View so text-align right works correctly */}
       <View style={styles.forgotWrapper}>
         <Text style={styles.forgot}>Forgot password?</Text>
       </View>
 
-      <TouchableOpacity style={styles.button}>
-        <Text style={styles.buttonText}>Log in</Text>
-      </TouchableOpacity>
+      <TouchableOpacity style={styles.button} onPress={handleLogin}>
+  <Text style={styles.buttonText}>Log in</Text>
+</TouchableOpacity>
 
       {/* FIX: OR divider with lines */}
       <View style={styles.orWrapper}>

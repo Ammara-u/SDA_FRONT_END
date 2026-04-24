@@ -6,11 +6,21 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from database import get_db
 from models import User
-from schema import TokenPair,UserCreate
+from schema import TokenPair,UserCreate,UserLogin
 from database import engine,Base,SessionLocal
 import uuid
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # for development
+    allow_credentials=True,
+    allow_methods=["*"],  # IMPORTANT (allows OPTIONS)
+    allow_headers=["*"],
+)
 
 # --- Config ---
 SECRET_KEY = "fbab35ec4019c91b7d06cd19a0e7290ca81d7b6bed0ea43e1fdcfa7128e7c1f2"
@@ -48,28 +58,10 @@ def decode_access_token(token:str):
     except JWTError:
         return None
 
-
-# def create_access_token(user_id: int):
-#     expire = datetime.utcnow() + timedelta(minutes=15)  # short lived
-#     return jwt.encode(
-#         {"sub": str(user_id), "exp": expire, "type": "access"},
-#         SECRET_KEY, algorithm=ALGORITHM
-#     )
-    
-# def create_refresh_token(user_id: int):
-#     expire = datetime.utcnow() + timedelta(days=30)  # long lived
-#     return jwt.encode(
-#         {"sub": str(user_id), "exp": expire, "type": "refresh"},
-#         SECRET_KEY, algorithm=ALGORITHM
-#     )
 Base.metadata.create_all(bind=engine)
 
 
-
-
 # sign up
-
-import uuid # Add this import at the top
 
 @app.post("/signup")
 def signup(user: UserCreate, db: Session = Depends(get_db)):
@@ -101,8 +93,7 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
 
 
 @app.post("/login", response_model=TokenPair)
-def login(user: UserCreate, db: Session = Depends(get_db)):
-    # 1. Fetch user from DB
+def login(user: UserLogin, db: Session = Depends(get_db)):    # 1. Fetch user from DB
     db_user = db.query(User).filter(User.username == user.username).first()
 
     # 2. Check if user exists and verify password
@@ -123,5 +114,31 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
+
+@app.post("/refresh", response_model=TokenPair)
+def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
+    try:
+        # 1. Decode the token
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+
+    # 2. Verify user still exists in DB
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    # 3. Generate a NEW access token
+    new_access_token = create_access_token(data={"sub": user.username})
+    
+    # 4. Return everything (keep the same refresh token or rotate it)
+    return {
+        "access_token": new_access_token,
+        "refresh_token": refresh_token, # You can reuse the current one
         "token_type": "bearer"
     }

@@ -4,6 +4,12 @@ from datetime import datetime
 
 
 # ── Users ──────────────────────────────────────────────────
+from pydantic import BaseModel
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
