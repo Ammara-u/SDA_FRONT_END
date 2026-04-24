@@ -14,6 +14,7 @@ class User(Base):
     department=Column(String)
     university=Column(String)
     bio=Column(String) 
+    profile_pic = Column(String, nullable=True)
     
 from sqlalchemy import UniqueConstraint
 
@@ -30,12 +31,22 @@ class Follow(Base):
     
 class Post(Base):
     __tablename__ = "posts"
-
     id = Column(String, primary_key=True)
     author_id = Column(String, ForeignKey("users.id"))
     content = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
+    
+    # Optional: Relationship to easily access images
+    # from sqlalchemy.orm import relationship
+    # images = relationship("PostImage", back_populates="post")
 
+class PostImage(Base):
+    __tablename__ = "post_images"
+    
+    id = Column(String, primary_key=True)
+    post_id = Column(String, ForeignKey("posts.id"))
+    image_url = Column(String)  # Example: "/uploads/posts/image123.jpg"
+    created_at = Column(DateTime, server_default=func.now())
 class Comment(Base):
     __tablename__ = "comments"
 
