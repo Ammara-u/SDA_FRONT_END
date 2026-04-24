@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -6,7 +6,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from database import get_db
-from models import User, Follow, Post
+from models import User, Follow, Post, PostImage
 from schema import TokenPair, UserCreate, UserLogin, UserUpdate
 from database import engine, Base, SessionLocal
 import uuid
@@ -36,7 +36,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 import bcrypt
-
 
 def hash_password(password: str):
     pwd_bytes = password.encode('utf-8')
@@ -69,7 +68,7 @@ def decode_access_token(token: str):
 
 Base.metadata.create_all(bind=engine)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
@@ -118,11 +117,39 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
     return {"message": "User created successfully"}
 
 
-@app.post("/login", response_model=TokenPair)
-def login(user: UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.username == user.username).first()
+# @app.post("/login", response_model=TokenPair)
+# def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    
+#     db_user = db.query(User).filter(User.username == form_data.username).first()
 
-    if not db_user or not verify_password(user.password, db_user.password):
+#     if not db_user or not verify_password(form_data.password, db_user.password):
+#         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+#     access_token = create_access_token(data={"sub": db_user.id})
+#     refresh_token = create_access_token(
+#         data={"sub": db_user.id},
+#         expires_delta=timedelta(days=7)
+#     )
+
+#     return {
+#         "access_token": access_token,
+#         "refresh_token": refresh_token,
+#         "token_type": "bearer"
+#     }
+
+
+
+from fastapi import Form
+
+@app.post("/login", response_model=TokenPair)
+def login(
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    db_user = db.query(User).filter(User.username == username).first()
+
+    if not db_user or not verify_password(password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     access_token = create_access_token(data={"sub": db_user.id})
@@ -220,41 +247,74 @@ def update_user(
     }}
 
 
-# ── UPLOAD PROFILE PICTURE ────────────────────────────────
-# Called by edit.tsx after the text fields are saved, if user picked a new photo
-@app.post("/users/{user_id}/profile-pic")
-async def upload_profile_pic(
-    user_id: str,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    if current_user.id != user_id:
-        raise HTTPException(status_code=403, detail="Not allowed")
 
+PROFILE_PIC_DIR = "uploads/user_profile"
+os.makedirs(PROFILE_PIC_DIR, exist_ok=True)
+
+
+@app.post("/users/{user_id}/upload-profile-pic")
+async def upload_profile_pic(
+    user_id: str, 
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 1. Security Check: Only the owner can change their photo
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this profile")
+
+    # 2. Validate it's actually an image
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image (jpg, png, etc.)")
+
+    # 3. Create a unique filename to prevent cache issues and collisions
+    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    filename = f"{uuid.uuid4()}.{ext}"
+    file_path = os.path.join(PROFILE_PIC_DIR, filename)
+
+    # 4. Save the file to the 'uploads/user_profile' folder
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not save file")
+
+    # 5. Store the PUBLIC URL in the database
+    # This matches your app.mount("/uploads", StaticFiles...) setting
+    public_url = f"/uploads/user_profile/{filename}"
+    
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Save the file to /uploads/profile_pics/
-    os.makedirs("uploads/profile_pics", exist_ok=True)
-    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-    filename = f"{user_id}.{ext}"
-    filepath = f"uploads/profile_pics/{filename}"
-
-    with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    # Save the public URL in the DB
-    # This URL will be accessible as http://192.168.100.22:8000/uploads/profile_pics/{filename}
-    public_url = f"http://192.168.100.22:8000/uploads/profile_pics/{filename}"
     user.profile_pic = public_url
-
     db.commit()
+    db.refresh(user)
 
-    return {"message": "Profile picture updated", "profile_pic": public_url}
+    return {
+        "message": "Profile picture updated successfully",
+        "profile_pic": public_url
+    }
 
+# ── UPLOAD PROFILE PICTURE ────────────────────────────────
+# Called by edit.tsx after the text fields are saved, if user picked a new photo
 
+# ── GET USER BY USERNAME ──────────────────────────────────
+@app.get("/users/username/{username}")
+def get_user_by_username(username: str, db: Session = Depends(get_db)):
+    # Query the database for the user with this specific username
+    user = db.query(User).filter(User.username == username).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Return the ID and other public info
+    return {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "profile_pic": user.profile_pic
+    }
 # ── FOLLOW ────────────────────────────────────────────────
 
 @app.post("/follow/{user_id}")
@@ -305,7 +365,7 @@ def unfollow_user(
 
     return {"message": "Unfollowed successfully"}
 
-
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # ── FOLLOWERS / FOLLOWING ─────────────────────────────────
 
 @app.get("/users/{user_id}/followers")
@@ -320,9 +380,181 @@ def get_following(user_id: str, db: Session = Depends(get_db)):
     return [{"follower_id": f.follower_id, "following_id": f.following_id} for f in following]
 
 
+
+
+# 1. Define the directory
+PROFILE_PIC_DIR = "uploads/user_profile"
+os.makedirs(PROFILE_PIC_DIR, exist_ok=True)
+
+# 2. Use @app.post directly (or ensure router is included)
+# @app.post("/users/{user_id}/upload-profile-pic")
+# async def upload_profile_pic(
+#     user_id: str, 
+#     file: UploadFile = File(...), 
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user) # Ensures security
+# ):
+#     # Security: Ensure user is only updating their own pic
+#     if current_user.id != user_id:
+#         raise HTTPException(status_code=403, detail="Not authorized")
+
+#     # Validate file type
+#     if not file.content_type.startswith("image/"):
+#         raise HTTPException(status_code=400, detail="File must be an image")
+
+#     # Generate unique filename to avoid browser caching issues
+#     ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+#     filename = f"{uuid.uuid4()}.{ext}"
+#     file_path = os.path.join(PROFILE_PIC_DIR, filename)
+
+#     # Save to disk
+#     with open(file_path, "wb") as buffer:
+#         shutil.copyfileobj(file.file, buffer)
+
+#     # Save the WEB URL to the database (so your frontend can see it)
+#     public_url = f"/uploads/user_profile/{filename}"
+    
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     user.profile_pic = public_url
+#     db.commit()
+
+#     return {
+#         "message": "Profile picture updated",
+#         "profile_pic": public_url
+#     }
+
 # ── POSTS ─────────────────────────────────────────────────
 
-@app.get("/users/{user_id}/posts")
-def get_user_posts(user_id: str, db: Session = Depends(get_db)):
-    posts = db.query(Post).filter(Post.author_id == user_id).all()
-    return posts
+@app.post("/posts")
+async def create_post(
+    content: str,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Create post first
+    new_post = Post(
+        id=str(uuid.uuid4()),
+        author_id=current_user.id,
+        content=content
+    )
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+
+    # Create folder
+
+    image_urls = []
+
+    for file in files:
+        # Validate image
+        if not file.content_type.startswith("image/"):
+            continue
+
+        ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+        filename = f"{uuid.uuid4()}.{ext}"
+        filepath = f"uploads/posts/{filename}"
+
+        # Save file
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Save image in DB
+        image = PostImage(
+            id=str(uuid.uuid4()),
+            post_id=new_post.id,
+            image_url=f"/uploads/posts/{filename}"
+        )
+
+        db.add(image)
+        image_urls.append(image.image_url)
+
+    db.commit()
+
+    return {
+        "message": "Post created",
+        "post_id": new_post.id,
+        "images": image_urls
+    }
+    
+router = APIRouter()
+
+UPLOAD_DIR = "uploads/user_profile"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+# @app.post("/users/{user_id}/profile-pic")
+# async def upload_profile_pic(
+#     user_id: str,
+#     file: UploadFile = File(...),
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+# ):
+#     if current_user.id != user_id:
+#         raise HTTPException(status_code=403, detail="Not allowed")
+
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     # ✅ Ensure folder exists
+#     upload_dir = "uploads/user_profile"
+#     os.makedirs(upload_dir, exist_ok=True)
+
+#     # ✅ Validate image
+#     if not file.content_type.startswith("image/"):
+#         raise HTTPException(status_code=400, detail="Only images allowed")
+
+#     # ✅ Unique filename (better than overwriting)
+#     ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+#     filename = f"{uuid.uuid4()}.{ext}"
+
+#     filepath = os.path.join(upload_dir, filename)
+
+#     # ✅ Save file
+#     with open(filepath, "wb") as buffer:
+#         shutil.copyfileobj(file.file, buffer)
+
+#     # ✅ Store PUBLIC URL (not raw path)
+#     public_url = f"/uploads/user_profile/{filename}"
+#     user.profile_pic = public_url
+
+#     db.commit()
+#     db.refresh(user)
+
+#     return {
+#         "message": "Profile picture updated",
+#         "profile_pic": public_url
+#     }
+
+# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
+# @router.post("/upload-profile-pic/{user_id}")
+# def upload_profile_pic(user_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    
+#     # Ensure folder exists
+#     os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+#     # Create unique filename
+#     file_ext = file.filename.split(".")[-1]
+#     file_name = f"user_{user_id}.{file_ext}"
+#     file_path = os.path.join(UPLOAD_DIR, file_name)
+
+#     # Save file
+#     with open(file_path, "wb") as buffer:
+#         shutil.copyfileobj(file.file, buffer)
+
+#     # Save path in DB
+#     user = db.query(User).filter(User.id == user_id).first()
+#     user.profile_pic = file_path
+#     db.commit()
+
+#     return {
+#         "message": "Profile picture updated",
+#         "file_path": file_path
+#     }
+    
+from fastapi.staticfiles import StaticFiles

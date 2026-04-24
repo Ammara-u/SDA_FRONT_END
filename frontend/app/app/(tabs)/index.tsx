@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native"
 import AsyncStorage from "@react-native-async-storage/async-storage";
-const API_URL = "http://192.168.100.22:8000";
+const API_URL = "http://127.0.0.1:8000";
 
 import React, { useState } from "react";
 import { useRouter } from "expo-router";
@@ -17,20 +17,20 @@ const handleLogin = async () => {
   try {
     console.log("🔵 Logging in...");
 
+    // 1. Use FormData instead of a plain object
+    const formData = new FormData();
+    formData.append("username", username);
+    formData.append("password", password);
+
     const response = await fetch(`${API_URL}/login`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        username,
-        password,
-      }),
+      // 2. IMPORTANT: Remove "Content-Type": "application/json"
+      // When sending FormData, the browser/app sets the boundary automatically
+      body: formData, 
     });
 
     console.log(" Status:", response.status);
-
-    const text = await response.text(); // ✅ safer than json()
+    const text = await response.text();
     console.log(" Raw response:", text);
 
     let data;
@@ -50,7 +50,6 @@ const handleLogin = async () => {
     await AsyncStorage.setItem("refresh_token", data.refresh_token);
 
     console.log("✅ Login success");
-
     router.replace("/profile");
 
   } catch (error) {
@@ -58,7 +57,6 @@ const handleLogin = async () => {
     alert("Something went wrong");
   }
 };
-
   return (
     
     <View style={styles.container}>

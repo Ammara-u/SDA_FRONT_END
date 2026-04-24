@@ -1,4 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
+
 import {
   View,
   Text,
@@ -17,7 +19,7 @@ import { decode as atob } from "base-64";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-const API_URL = "http://192.168.100.22:8000";
+const API_URL = "http://127.0.0.1:8000";
 const { width } = Dimensions.get("window");
 const TILE_SIZE = (width - 3) / 3;
 
@@ -157,9 +159,11 @@ export default function ProfileScreen({ navigation }: any) {
     }
   }, []);
 
-  useEffect(() => {
+  useFocusEffect(
+  useCallback(() => {
     fetchData();
-  }, [fetchData]);
+  }, [])  // empty deps — re-runs every time screen is focused
+);
 
   // ── LOADING STATE ──
   if (loading) {
@@ -187,11 +191,12 @@ export default function ProfileScreen({ navigation }: any) {
       </View>
 
       {/* Avatar + Stats */}
+      
       <View style={styles.avatarStatsRow}>
         <View style={styles.avatarWrapper}>
           {user?.profile_pic ? (
             <Image
-              source={{ uri: user.profile_pic }}
+              source={{ uri: `${API_URL}${user.profile_pic}` }}
               style={styles.avatar}
             />
           ) : (

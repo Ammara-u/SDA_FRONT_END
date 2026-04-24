@@ -47,6 +47,8 @@ class PostImage(Base):
     post_id = Column(String, ForeignKey("posts.id"))
     image_url = Column(String)  # Example: "/uploads/posts/image123.jpg"
     created_at = Column(DateTime, server_default=func.now())
+
+
 class Comment(Base):
     __tablename__ = "comments"
 

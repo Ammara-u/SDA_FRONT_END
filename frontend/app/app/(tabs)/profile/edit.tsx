@@ -18,7 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 
-const API_URL = "http://192.168.100.22:8000";
+const API_URL = "http://127.0.0.1:8000";
 
 // ─── TOKEN DECODER ──────────────────────────────────────
 function decodeToken(token: string) {
@@ -86,7 +86,6 @@ export default function EditProfileScreen() {
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
   const [department, setDepartment] = useState("");
-  const [university, setUniversity] = useState("");
   const [profilePic, setProfilePic] = useState<string | null>(null);
 
   // ── Load existing user data ──
@@ -116,9 +115,9 @@ export default function EditProfileScreen() {
         setUsername(data.username ?? "");
         setBio(data.bio ?? "");
         setDepartment(data.department ?? "");
-        setUniversity(data.university ?? "");
-        setProfilePic(data.profile_pic ?? null);
-      } catch (err) {
+setProfilePic(
+  data.profile_pic ? `${API_URL}${data.profile_pic}` : null
+);      } catch (err) {
         console.log("❌ Load error:", err);
       } finally {
         setLoading(false);
@@ -128,6 +127,7 @@ export default function EditProfileScreen() {
     load();
   }, []);
 
+  
   // ── Pick profile photo ──
   const handleChangePhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -149,59 +149,81 @@ export default function EditProfileScreen() {
   };
 
   // ── Save changes ──
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const token = await AsyncStorage.getItem("access_token");
+const handleSave = async () => {
+  setSaving(true);
 
-      const body: Record<string, string> = {
+  try {
+    const token = await AsyncStorage.getItem("access_token");
+
+    // ── 1. UPDATE TEXT DATA ──
+    const updateRes = await fetch(`${API_URL}/users/${userId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         full_name: fullName,
         username,
         bio,
         department,
-        university,
-      };
+      }),
+    });
 
-      const res = await fetch(`${API_URL}/users/${userId}`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        Alert.alert("Error", err.detail ?? "Could not save changes.");
-        return;
-      }
-
-      // If user picked a new photo, upload it separately
-      if (profilePic && profilePic.startsWith("file")) {
-        const form = new FormData();
-        form.append("file", {
-          uri: profilePic,
-          name: "profile.jpg",
-          type: "image/jpeg",
-        } as any);
-
-        await fetch(`${API_URL}/users/${userId}/profile-pic`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: form,
-        });
-      }
-
-      console.log("✅ Profile saved");
-      router.back(); // go back to profile screen
-    } catch (err) {
-      console.log("❌ Save error:", err);
-      Alert.alert("Error", "Something went wrong.");
-    } finally {
-      setSaving(false);
+    if (!updateRes.ok) {
+      const err = await updateRes.json();
+      Alert.alert("Error", err.detail ?? "Could not save changes.");
+      return;
     }
-  };
+
+    // ── 2. UPLOAD IMAGE (if changed) ──
+if (profilePic && !profilePic.startsWith("http")) {
+  const form = new FormData();
+
+  const filename = profilePic.split("/").pop() || "profile.jpg";
+
+  // 🔥 convert to blob (REQUIRED for web)
+  const response = await fetch(profilePic);
+  const blob = await response.blob();
+
+  form.append("file", blob, filename);
+
+  const uploadRes = await fetch(
+    `${API_URL}/users/${userId}/upload-profile-pic`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: form,
+    }
+  );
+
+  const uploadData = await uploadRes.json();
+
+  if (!uploadRes.ok) {
+    console.log("UPLOAD ERROR:", uploadData);
+    Alert.alert("Upload failed");
+    return;
+  }
+
+  console.log("UPLOAD SUCCESS:", uploadData);
+
+  setProfilePic(`${API_URL}${uploadData.profile_pic}`);
+}
+
+    console.log("✅ Profile saved");
+
+    // ── 3. NAVIGATE BACK ──
+    router.replace("/(tabs)/profile");
+
+  } catch (err) {
+    console.log("❌ Save error:", err);
+    Alert.alert("Error", "Something went wrong.");
+  } finally {
+    setSaving(false);
+  }
+};
 
   // ── Loading state ──
   if (loading) {
@@ -283,19 +305,6 @@ export default function EditProfileScreen() {
           onChangeText={setDepartment}
           placeholder="e.g. Computer Science"
         />
-        <FieldRow
-          label="University"
-          value={university}
-          onChangeText={setUniversity}
-          placeholder="e.g. LUMS"
-        />
-
-        {/* ── Switch to professional ── */}
-        <TouchableOpacity style={styles.professionalBtn}>
-          <Text style={styles.professionalText}>
-            Switch to Professional Account
-          </Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
