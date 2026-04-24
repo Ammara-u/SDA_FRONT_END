@@ -18,7 +18,8 @@ class UserCreate(BaseModel):
     university: Optional[str] = None
     department: Optional[str] = None
     graduation_year: Optional[int] = None
-    bio=str
+    bio:Optional[int] = None
+    
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     bio: Optional[str] = None

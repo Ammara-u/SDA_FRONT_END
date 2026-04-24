@@ -29,10 +29,10 @@ const handleLogin = async () => {
       }),
     });
 
-    console.log("🟡 Status:", response.status);
+    console.log(" Status:", response.status);
 
     const text = await response.text(); // ✅ safer than json()
-    console.log("🟡 Raw response:", text);
+    console.log(" Raw response:", text);
 
     let data;
     try {

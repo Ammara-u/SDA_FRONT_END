@@ -13,7 +13,8 @@ class User(Base):
     created_at = Column(DateTime, server_default=func.now())
     department=Column(String)
     university=Column(String)
-    bio=Column(String)
+    bio=Column(String) 
+    
 from sqlalchemy import UniqueConstraint
 
 class Follow(Base):
