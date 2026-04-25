@@ -66,7 +66,7 @@ function PostTile({ post }: { post: Post }) {
     <TouchableOpacity style={styles.tile} activeOpacity={0.8}>
       {firstImage ? (
         <Image
-          source={{ uri: firstImage }}
+         source={{ uri: `${API_URL}${firstImage}` }}
           style={styles.tileImage}
           resizeMode="cover"
         />

@@ -6,12 +6,13 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from database import get_db
-from models import User, Follow, Post, PostImage
+from models import User, Follow, Post, PostImage, PostLike, Comment
 from schema import TokenPair, UserCreate, UserLogin, UserUpdate
 from database import engine, Base, SessionLocal
 import uuid
 import os
 import shutil
+from schema import CommentCreate
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -26,7 +27,7 @@ app.add_middleware(
 
 # ── Serve uploaded files as static ──────────────────────
 os.makedirs("uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # --- Config ---
 SECRET_KEY = "fbab35ec4019c91b7d06cd19a0e7290ca81d7b6bed0ea43e1fdcfa7128e7c1f2"
@@ -197,6 +198,36 @@ def get_user_by_id(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+# @app.get("/users/{user_id}/posts")
+# def get_user_posts(user_id: str, db: Session = Depends(get_db)):
+#     posts = db.query(Post).filter(Post.author_id == user_id).all()
+#     return posts
+
+
+
+@app.get("/users/{user_id}/posts")
+def get_user_posts(user_id: str, db: Session = Depends(get_db)):
+    posts = db.query(Post).filter(Post.author_id == user_id).all()
+
+    result = []
+
+    for post in posts:
+        images = db.query(PostImage).filter(PostImage.post_id == post.id).all()
+
+        result.append({
+            "id": post.id,
+            "content": post.content,
+            "created_at": post.created_at,
+            "images": [
+                {
+                    "id": img.id,
+                    "image_url": img.image_url
+                }
+                for img in images
+            ]
+        })
+
+    return result
 
 # ── UPDATE PROFILE ────────────────────────────────────────
 # Called by edit.tsx when user taps "Done"
@@ -379,54 +410,13 @@ def get_following(user_id: str, db: Session = Depends(get_db)):
     following = db.query(Follow).filter(Follow.follower_id == user_id).all()
     return [{"follower_id": f.follower_id, "following_id": f.following_id} for f in following]
 
-
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 # 1. Define the directory
 PROFILE_PIC_DIR = "uploads/user_profile"
 os.makedirs(PROFILE_PIC_DIR, exist_ok=True)
 
-# 2. Use @app.post directly (or ensure router is included)
-# @app.post("/users/{user_id}/upload-profile-pic")
-# async def upload_profile_pic(
-#     user_id: str, 
-#     file: UploadFile = File(...), 
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_current_user) # Ensures security
-# ):
-#     # Security: Ensure user is only updating their own pic
-#     if current_user.id != user_id:
-#         raise HTTPException(status_code=403, detail="Not authorized")
-
-#     # Validate file type
-#     if not file.content_type.startswith("image/"):
-#         raise HTTPException(status_code=400, detail="File must be an image")
-
-#     # Generate unique filename to avoid browser caching issues
-#     ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-#     filename = f"{uuid.uuid4()}.{ext}"
-#     file_path = os.path.join(PROFILE_PIC_DIR, filename)
-
-#     # Save to disk
-#     with open(file_path, "wb") as buffer:
-#         shutil.copyfileobj(file.file, buffer)
-
-#     # Save the WEB URL to the database (so your frontend can see it)
-#     public_url = f"/uploads/user_profile/{filename}"
-    
-#     user = db.query(User).filter(User.id == user_id).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     user.profile_pic = public_url
-#     db.commit()
-
-#     return {
-#         "message": "Profile picture updated",
-#         "profile_pic": public_url
-#     }
-
-# ── POSTS ─────────────────────────────────────────────────
 
 @app.post("/posts")
 async def create_post(
@@ -481,80 +471,130 @@ async def create_post(
         "images": image_urls
     }
     
+    
+@app.post("/posts/{post_id}/like")
+def like_post(
+    post_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    existing = db.query(PostLike).filter(
+        PostLike.post_id == post_id,
+        PostLike.user_id == current_user.id
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Already liked")
+
+    like = PostLike(
+        id=str(uuid.uuid4()),
+        post_id=post_id,
+        user_id=current_user.id
+    )
+
+    db.add(like)
+    db.commit()
+
+    return {"message": "Post liked"}
 router = APIRouter()
+
+@app.delete("/posts/{post_id}/like")
+def unlike_post(
+    post_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    like = db.query(PostLike).filter(
+        PostLike.post_id == post_id,
+        PostLike.user_id == current_user.id
+    ).first()
+
+    if not like:
+        raise HTTPException(status_code=404, detail="Not liked yet")
+
+    db.delete(like)
+    db.commit()
+
+    return {"message": "Unliked"}
+
+
+
+@app.get("/posts/{post_id}/likes")
+def get_likes(post_id: str, db: Session = Depends(get_db)):
+    count = db.query(PostLike).filter(PostLike.post_id == post_id).count()
+    return {"post_id": post_id, "likes": count}
+
+
+
+
+@app.post("/posts/{post_id}/comment")
+def create_comment(
+    post_id: str,
+    comment: CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
+    new_comment = Comment(
+        id=str(uuid.uuid4()),
+        post_id=post_id,
+        author_id=current_user.id,
+        content=comment.content,
+        parent_id=comment.parent_id
+    )
+
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+
+    return {
+        "message": "Comment added",
+        "comment": {
+            "id": new_comment.id,
+            "content": new_comment.content,
+            "post_id": new_comment.post_id,
+            "author_id": new_comment.author_id,
+            "parent_id": new_comment.parent_id,
+            "created_at": new_comment.created_at
+        }
+    }
+    
+@app.get("/posts/{post_id}/comments")
+def get_comments(post_id: str, db: Session = Depends(get_db)):
+    comments = db.query(Comment).filter(Comment.post_id == post_id).all()
+
+    return [
+        {
+            "id": c.id,
+            "content": c.content,
+            "author_id": c.author_id,
+            "parent_id": c.parent_id,
+            "created_at": c.created_at
+        }
+        for c in comments
+    ]
+
+@app.delete("/comments/{comment_id}")
+def delete_comment(
+    comment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    comment = db.query(Comment).filter(Comment.id == comment_id).first()
+
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.author_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    db.delete(comment)
+    db.commit()
+
+    return {"message": "Comment deleted"}
+
+
 
 UPLOAD_DIR = "uploads/user_profile"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-# @app.post("/users/{user_id}/profile-pic")
-# async def upload_profile_pic(
-#     user_id: str,
-#     file: UploadFile = File(...),
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_current_user),
-# ):
-#     if current_user.id != user_id:
-#         raise HTTPException(status_code=403, detail="Not allowed")
-
-#     user = db.query(User).filter(User.id == user_id).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     # ✅ Ensure folder exists
-#     upload_dir = "uploads/user_profile"
-#     os.makedirs(upload_dir, exist_ok=True)
-
-#     # ✅ Validate image
-#     if not file.content_type.startswith("image/"):
-#         raise HTTPException(status_code=400, detail="Only images allowed")
-
-#     # ✅ Unique filename (better than overwriting)
-#     ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-#     filename = f"{uuid.uuid4()}.{ext}"
-
-#     filepath = os.path.join(upload_dir, filename)
-
-#     # ✅ Save file
-#     with open(filepath, "wb") as buffer:
-#         shutil.copyfileobj(file.file, buffer)
-
-#     # ✅ Store PUBLIC URL (not raw path)
-#     public_url = f"/uploads/user_profile/{filename}"
-#     user.profile_pic = public_url
-
-#     db.commit()
-#     db.refresh(user)
-
-#     return {
-#         "message": "Profile picture updated",
-#         "profile_pic": public_url
-#     }
-
-# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
-# @router.post("/upload-profile-pic/{user_id}")
-# def upload_profile_pic(user_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    
-#     # Ensure folder exists
-#     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-#     # Create unique filename
-#     file_ext = file.filename.split(".")[-1]
-#     file_name = f"user_{user_id}.{file_ext}"
-#     file_path = os.path.join(UPLOAD_DIR, file_name)
-
-#     # Save file
-#     with open(file_path, "wb") as buffer:
-#         shutil.copyfileobj(file.file, buffer)
-
-#     # Save path in DB
-#     user = db.query(User).filter(User.id == user_id).first()
-#     user.profile_pic = file_path
-#     db.commit()
-
-#     return {
-#         "message": "Profile picture updated",
-#         "file_path": file_path
-#     }
-    
-from fastapi.staticfiles import StaticFiles
