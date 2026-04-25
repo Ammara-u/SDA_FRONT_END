@@ -19,7 +19,7 @@ import { decode as atob } from "base-64";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "https://sda-app-backend.onrender.com/";
 const { width } = Dimensions.get("window");
 const TILE_SIZE = (width - 3) / 3;
 

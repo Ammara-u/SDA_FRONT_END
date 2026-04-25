@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-nativ
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 
-const API_URL = "http://192.168.100.22:8000";
+const API_URL = "https://sda-app-backend.onrender.com/";
 
 export default function Signup() {
   const router = useRouter();
