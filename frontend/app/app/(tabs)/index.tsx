@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native"
 import AsyncStorage from "@react-native-async-storage/async-storage";
-const API_URL = "https://sda-app-backend.onrender.com/";
+const API_URL = "https://sda-app-backend.onrender.com";
 
 import React, { useState } from "react";
 import { useRouter } from "expo-router";
