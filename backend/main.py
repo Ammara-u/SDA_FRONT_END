@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
 from database import get_db, engine, Base
-from models import User, Follow, Post, PostImage, PostLike, Comment
-from schema import TokenPair, UserCreate, UserUpdate, CommentCreate
+from models import User,Message,ConversationParticipant,Conversation, Follow, Post, PostImage, PostLike, Comment
+from schema import TokenPair, UserCreate, UserUpdate, CommentCreate, MessageCreate
 
 
 # ── App & Middleware ──────────────────────────────────────
@@ -23,10 +23,14 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    
-    allow_origins=[
-    "https://sda-front-end-1a92.vercel.app"
-]
+    allow_origins=['*'],
+    # allow_origins=[
+    #     "http://localhost:8081",
+    #     "http://127.0.0.1:8081",  # ✅ add this
+    #     "http://localhost:8000",
+    #     "https://sda-front-end-xhiu.vercel.app"
+        
+    # ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -357,6 +361,90 @@ async def create_post(
     return {"message": "Post created", "post_id": new_post.id, "images": image_urls}
 
 
+# ✅ FIXED: now saves PostImage row so images appear in /users/{id}/posts
+@app.post("/post-with-image")
+def create_post_with_image(
+    content: str = Form(...),
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),  # ✅ now uses real auth, not raw author_id
+):
+    try:
+        # 1. Create the Post row first
+        post = Post(
+            id=str(uuid.uuid4()),
+            author_id=current_user.id,  # ✅ from token, not form
+            content=content,
+            created_at=datetime.utcnow(),
+        )
+        db.add(post)
+        db.commit()
+        db.refresh(post)
+
+        # 2. If an image was uploaded, save file AND create PostImage row
+        image_url = None
+        if file and file.filename:
+            if not file.content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="File must be an image")
+
+            ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+            filename = f"{uuid.uuid4()}.{ext}"
+            path = f"uploads/posts/{filename}"
+
+            with open(path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            image_url = f"/uploads/posts/{filename}"
+
+            # ✅ THIS WAS THE MISSING LINE — create PostImage row in DB
+            post_image = PostImage(
+                id=str(uuid.uuid4()),
+                post_id=post.id,
+                image_url=image_url,
+            )
+            db.add(post_image)
+            db.commit()
+
+        return {
+            "message": "Post created",
+            "post_id": post.id,
+            "image": image_url,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print("ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/feed")
+def feed(db: Session = Depends(get_db)):
+    posts = db.query(Post).order_by(Post.created_at.desc()).all()
+
+    result = []
+
+    for p in posts:
+        user = db.query(User).filter(User.id == p.author_id).first()
+        images = db.query(PostImage).filter(PostImage.post_id == p.id).all()
+
+        result.append({
+            "id": str(p.id),
+            "username": user.username if user else "unknown",
+            "profile_pic": user.profile_pic if user else None,
+            "content": p.content,
+            "image": images[0].image_url if images else None,
+            "images": [
+                {"id": img.id, "image_url": img.image_url}
+                for img in images
+            ],
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
+
+    return result
+
+
 @app.post("/posts/{post_id}/like")
 def like_post(
     post_id: str,
@@ -441,6 +529,7 @@ def get_comments(post_id: str, db: Session = Depends(get_db)):
         for c in comments
     ]
 
+
 @app.get("/search")
 def search_users(query: str, db: Session = Depends(get_db)):
     users = db.query(User).filter(
@@ -460,6 +549,7 @@ def search_users(query: str, db: Session = Depends(get_db)):
         for user in users
     ]
 
+
 @app.delete("/comments/{comment_id}")
 def delete_comment(
     comment_id: str,
@@ -477,3 +567,166 @@ def delete_comment(
     db.commit()
 
     return {"message": "Comment deleted"}
+
+
+# ── CHATS ─────────────────────────────────────────────────
+ 
+@app.get("/chats")
+def get_chats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    following = db.query(Follow).filter(Follow.follower_id == current_user.id).all()
+    following_ids = set(f.following_id for f in following)
+ 
+    followers = db.query(Follow).filter(Follow.following_id == current_user.id).all()
+    follower_ids = set(f.follower_id for f in followers)
+ 
+    mutual_ids = following_ids & follower_ids
+ 
+    if not mutual_ids:
+        return []
+ 
+    users = db.query(User).filter(User.id.in_(mutual_ids)).all()
+ 
+    result = []
+    for user in users:
+        # ✅ Find the shared conversation between current_user and this user
+        last_message_text = "Start chatting 👋"
+        last_message_time = None
+ 
+        all_convos = db.query(Conversation).all()
+        for convo in all_convos:
+            participants = db.query(ConversationParticipant).filter(
+                ConversationParticipant.conversation_id == convo.id
+            ).all()
+            ids = set(p.user_id for p in participants)
+            if ids == {current_user.id, user.id}:
+                # Found the conversation — get last message
+                last_msg = (
+                    db.query(Message)
+                    .filter(Message.conversation_id == convo.id)
+                    .order_by(Message.created_at.desc())
+                    .first()
+                )
+                if last_msg:
+                    last_message_text = last_msg.content
+                    last_message_time = last_msg.created_at.isoformat() if last_msg.created_at else None
+                break
+ 
+        result.append({
+            "user_id": user.id,
+            "username": user.username,
+            "profile_pic": f"https://sda-app-backend.onrender.com{user.profile_pic}" if user.profile_pic else None,
+            "last_message": last_message_text,
+            "timestamp": last_message_time,
+        })
+ 
+    return result
+ 
+ 
+@app.post("/conversations/{other_user_id}")
+def create_or_get_conversation(
+    other_user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conversations = db.query(Conversation).all()
+ 
+    for convo in conversations:
+        participants = db.query(ConversationParticipant).filter(
+            ConversationParticipant.conversation_id == convo.id
+        ).all()
+ 
+        ids = set(p.user_id for p in participants)
+ 
+        if ids == {current_user.id, other_user_id}:
+            return {"conversation_id": convo.id}
+ 
+    convo = Conversation(id=str(uuid.uuid4()))
+    db.add(convo)
+    db.commit()
+ 
+    db.add_all([
+        ConversationParticipant(
+            id=str(uuid.uuid4()),
+            conversation_id=convo.id,
+            user_id=current_user.id,
+        ),
+        ConversationParticipant(
+            id=str(uuid.uuid4()),
+            conversation_id=convo.id,
+            user_id=other_user_id,
+        ),
+    ])
+    db.commit()
+ 
+    return {"conversation_id": convo.id}
+ 
+ 
+# ✅ GET messages in a conversation
+@app.get("/messages/{conversation_id}")
+def get_messages(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify current user is a participant
+    participant = db.query(ConversationParticipant).filter(
+        ConversationParticipant.conversation_id == conversation_id,
+        ConversationParticipant.user_id == current_user.id,
+    ).first()
+ 
+    if not participant:
+        raise HTTPException(status_code=403, detail="Not a participant in this conversation")
+ 
+    messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id
+    ).order_by(Message.created_at).all()
+ 
+    return [
+        {
+            "id": m.id,
+            "text": m.content,
+            "sender_id": m.sender_id,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in messages
+    ]
+ 
+ 
+# ✅ POST — send a message (THIS WAS MISSING)
+@app.post("/messages/{conversation_id}")
+def send_message(
+    conversation_id: str,
+    body: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify current user is a participant
+    participant = db.query(ConversationParticipant).filter(
+        ConversationParticipant.conversation_id == conversation_id,
+        ConversationParticipant.user_id == current_user.id,
+    ).first()
+ 
+    if not participant:
+        raise HTTPException(status_code=403, detail="Not a participant in this conversation")
+ 
+    new_message = Message(
+        id=str(uuid.uuid4()),
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        content=body.content,
+        created_at=datetime.utcnow(),
+    )
+ 
+    db.add(new_message)
+    db.commit()
+    db.refresh(new_message)
+ 
+    return {
+        "id": new_message.id,
+        "text": new_message.content,
+        "sender_id": new_message.sender_id,
+        "created_at": new_message.created_at.isoformat(),
+    }
